@@ -1,5 +1,6 @@
 ﻿using CommandLine;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -10,7 +11,8 @@ namespace CodeCoverageSummary
     internal static class Program
     {
         // test file: /Dev/Csharp/CodeCoverageSummary/coverage.cobertura.xml
-
+        static List<CodeSummary> codeSummaries = new List<CodeSummary>();
+        static List<string> files = new List<string>();
         private static int Main(string[] args)
         {
             return Parser.Default.ParseArguments<CommandLineOptions>(args)
@@ -18,37 +20,69 @@ namespace CodeCoverageSummary
                                        {
                                            try
                                            {
-                                               if (!File.Exists(o.Filename))
+                                               if (o.Files != null)
                                                {
-                                                   Console.WriteLine("Error: Code coverage file not found.");
-                                                   return -2; // error
-                                               }
+                                                   if (o.Files.Contains(','))
+                                                   {
+                                                       files = o.Files.Split(',').ToList();
+                                                   }
+                                                   else
+                                                   {
+                                                       files.Add(o.Files);
+                                                   }
 
-                                               // parse code coverage file
-                                               Console.WriteLine($"Code Coverage File: {o.Filename}");
-                                               CodeSummary summary = ParseTestResults(o.Filename);
-                                               if (summary == null)
+                                                   Console.WriteLine("Files:" + files.Count);
+                                               }
+                                               if (files.Count > 0)
                                                {
-                                                   Console.WriteLine("Error: Parsing code coverage file.");
-                                                   return -2; // error
+                                                   foreach (var file in files)
+                                                   {
+                                                       Console.WriteLine($"Code Coverage File: {file}");
+                                                   }
+                                                   for (int i = 0; i < files.Count; i++)
+                                                   {
+                                                       string fileName = files[i].Trim();
+                                                       Console.WriteLine($"Trimmed Filename: {fileName}");
+                                                       // parse code coverage file
+                                                       CodeSummary summary = ParseTestResults(fileName);
+                                                       if (summary == null)
+                                                       {
+                                                           Console.WriteLine("Error: Parsing code coverage file.");
+                                                           return -2; // error
+                                                       }
+                                                       codeSummaries.Add(summary);
+                                                   }
                                                }
                                                else
                                                {
+                                                   Console.WriteLine("Error:no files found.");
+                                                   return -2; // error
+                                               }
+
+                                               if (codeSummaries.Count > 0)
+                                               {
                                                    // generate badge
-                                                   string badgeUrl = o.Badge ? GenerateBadge(summary) : null;
+                                                   string badgeUrl = o.Badge ? GenerateBadge(codeSummaries[1]) : null;
 
                                                    // generate output
                                                    string output;
+                                                   double diff;
                                                    string fileExt;
                                                    if (o.Format.Equals("text", StringComparison.OrdinalIgnoreCase))
                                                    {
                                                        fileExt = "txt";
-                                                       output = GenerateTextOutput(summary, badgeUrl);
+                                                       output = GenerateTextOutput(codeSummaries.ToArray(), badgeUrl);
                                                    }
                                                    else if (o.Format.Equals("md", StringComparison.OrdinalIgnoreCase) || o.Format.Equals("markdown", StringComparison.OrdinalIgnoreCase))
                                                    {
                                                        fileExt = "md";
-                                                       output = GenerateMarkdownOutput(summary, badgeUrl);
+                                                       (output, diff) = GenerateMarkdownOutput(codeSummaries.ToArray(), badgeUrl, o.AllowedCoverageDiff);
+                                                       Console.WriteLine($"diff: {String.Format("{0:P2}", diff):N0}");
+                                                       if (diff*100 < o.AllowedCoverageDiff)
+                                                       {
+                                                           Console.WriteLine($"Error: Code Coverage decreased by more than {o.AllowedCoverageDiff}%");
+                                                           return -2; // error
+                                                       }
                                                    }
                                                    else
                                                    {
@@ -75,10 +109,16 @@ namespace CodeCoverageSummary
                                                        Console.WriteLine("Error: Unknown output type.");
                                                        return -2; // error
                                                    }
-
-                                                   return 0; // success
                                                }
+                                               else
+                                               {
+                                                   Console.WriteLine("No CodeSummaries found.");
+                                                   return -2; // error
+                                               }
+
+                                               return 0;
                                            }
+
                                            catch (Exception ex)
                                            {
                                                Console.WriteLine($"Error: {ex.GetType()} - {ex.Message}");
@@ -87,13 +127,13 @@ namespace CodeCoverageSummary
                                        },
                                        errs => -1); // invalid arguments
         }
-
         private static CodeSummary ParseTestResults(string filename)
         {
             CodeSummary summary = new();
             try
             {
                 string rss = File.ReadAllText(filename);
+
                 var xdoc = XDocument.Parse(rss);
 
                 // test coverage for solution
@@ -103,7 +143,8 @@ namespace CodeCoverageSummary
                 var lineR = from item in coverage.Attributes()
                             where item.Name == "line-rate"
                             select item;
-                summary.LineRate = double.Parse(lineR.First().Value);
+                summary.LineRate = ((double)lineR.First());
+                Console.WriteLine("LineRate:" + summary.LineRate);
 
                 var linesCovered = from item in coverage.Attributes()
                                    where item.Name == "lines-covered"
@@ -141,12 +182,13 @@ namespace CodeCoverageSummary
                     CodeCoverage packageCoverage = new()
                     {
                         Name = item.Attribute("name").Value,
-                        LineRate = double.Parse(item.Attribute("line-rate").Value),
-                        BranchRate = double.Parse(item.Attribute("branch-rate").Value),
-                        Complexity = int.Parse(item.Attribute("complexity").Value)
+                        LineRate = ((double)item.Attribute("line-rate")),
+                        // BranchRate = double.Parse(item.Attribute("branch-rate").Value),
+                        //Complexity = int.Parse(item.Attribute("complexity").Value)
                     };
+
                     summary.Packages.Add(packageCoverage);
-                    summary.Complexity += packageCoverage.Complexity;
+                    //summary.Complexity += packageCoverage.Complexity;
                 }
 
                 return summary;
@@ -173,10 +215,10 @@ namespace CodeCoverageSummary
             {
                 colour = "success";
             }
-            return $"https://img.shields.io/badge/Code%20Coverage-{summary.LineRate * 100:N0}%25-{colour}?style=flat";
+            return $"https://img.shields.io/badge/Code%20Coverage-{summary.LineRate*100:N0}%25-{colour}?style=flat";
         }
 
-        private static string GenerateTextOutput(CodeSummary summary, string badgeUrl)
+        private static string GenerateTextOutput(CodeSummary[] summaries, string badgeUrl)
         {
             StringBuilder textOutput = new();
 
@@ -185,20 +227,151 @@ namespace CodeCoverageSummary
                 textOutput.AppendLine(badgeUrl);
             }
 
-            textOutput.AppendLine($"Line Rate = {summary.LineRate * 100:N0}%, Lines Covered = {summary.LinesCovered} / {summary.LinesValid}")
-                      .AppendLine($"Branch Rate = {summary.BranchRate * 100:N0}%, Branches Covered = {summary.BranchesCovered} / {summary.BranchesValid}")
-                      .AppendLine($"Complexity = {summary.Complexity}");
+            var diff_LineRate = summaries[0].LineRate - summaries[1].LineRate;
+            var diff_LineCovered = summaries[0].LinesCovered - summaries[1].LinesCovered;
+            var diff_LineValid = summaries[0].LinesValid - summaries[1].LinesValid;
 
-            foreach (CodeCoverage package in summary.Packages)
+            textOutput.AppendLine($"Base Coverage Rate = {summaries[0].LineRate * 100:N0}%")
+                      .AppendLine($"Current Coverage Rate = {summaries[1].LineRate * 100:N0}%")
+                      .AppendLine($"Differnece Rate = {diff_LineRate * 100:N0}%")
+                      .AppendLine($"status = {summaries[1].Status}");
+
+            for (int i = 0; i < summaries.Length; i++)
             {
-                textOutput.AppendLine($"{package.Name}: Line Rate = {package.LineRate * 100:N0}%, Branch Rate = {package.BranchRate * 100:N0}%, Complexity = {package.Complexity}");
+                foreach (var package in summaries[i].Packages)
+                {
+                    textOutput.AppendLine($"{package.Name}: Line Rate = {package.LineRate * 100:N0}%");
+                }
             }
 
             return textOutput.ToString();
         }
 
-        private static string GenerateMarkdownOutput(CodeSummary summary, string badgeUrl)
+        private static Tuple<string, double> GenerateMarkdownOutput(CodeSummary[] summaries, string badgeUrl, double diff_coverage)
         {
+            string status = string.Empty;
+            StringBuilder markdownOutput = new();
+            double diffLineRate = 0;
+
+            if (!string.IsNullOrWhiteSpace(badgeUrl))
+            {
+                markdownOutput.AppendLine($"![Code Coverage]({badgeUrl})");
+                markdownOutput.AppendLine("");
+            }
+
+            diffLineRate = summaries[1].LineRate - summaries[0].LineRate;
+            if (diffLineRate*100 < 0)
+            {
+                status = ":small_red_triangle_down:";
+                markdownOutput.AppendLine($"Code coverage **decreased 🔻** by **{String.Format("{0:P2}", diffLineRate):N0}**");
+                markdownOutput.AppendLine("");
+            }
+            else if (diffLineRate == 0)
+            {
+                status = "\uFF1D";
+                markdownOutput.AppendLine($"Code coverage has been not changed ==.");
+                markdownOutput.AppendLine("");
+            }
+            else
+            {
+                status = ":white_check_mark:";
+                markdownOutput.AppendLine($"Code coverage **increased 👍** by **{String.Format("{0:P2}", diffLineRate):N0}**");
+                markdownOutput.AppendLine("");
+            }
+
+            var diff_LineCovered = summaries[1].LinesCovered - summaries[0].LinesCovered;
+            var diff_LineValid = summaries[1].LinesValid - summaries[0].LinesValid;
+
+           
+            markdownOutput.AppendLine("Package | Base Branch | Current Branch | Difference | Status")
+                          .AppendLine("-------- | --------- | ----------- | ---------- | ----------");
+
+            markdownOutput.Append($"**Summary** | **{String.Format("{0:P2}", summaries[0].LineRate):N0}** | ")
+                          .AppendLine($"**{String.Format("{0:P2}", summaries[1].LineRate):N0}** |  **{String.Format("{0:P2}", diffLineRate):N0}** | {status}");
+
+
+            var dict1 = getLineRate(summaries[0].Packages.ToArray());
+
+            var dict2 = getLineRate(summaries[1].Packages.ToArray());
+
+            var dict3 = new Dictionary<string, double>();
+
+            if (dict1.Keys.Count > dict2.Keys.Count)
+            {
+                foreach (var key in dict1.Keys)
+                {
+                    if (dict2.Keys.Contains(key))
+                    {
+                        diffLineRate = dict2[key] - dict1[key];
+                        if (diffLineRate < 0)
+                        {
+                            status = ":small_red_triangle_down:";
+                        }
+                        else if (diffLineRate == 0)
+                        {
+                            status = "\uFF1D";
+                        }
+                        else
+                        {
+                            status = ":white_check_mark:";
+                        }
+                        markdownOutput.AppendLine($"{key} | {String.Format("{0:P2}", dict1[key]):N0} | {String.Format("{0:P2}", dict2[key]):N0} | {String.Format("{0:P2}", diffLineRate):NO} | {status} ");
+                    }
+                    else
+                    {
+                        dict3.Add(key, dict1[key]);
+                        Console.WriteLine("dict3 key count:" + dict3.Keys.Count);
+                        markdownOutput.AppendLine($"{key} | - | {String.Format("{0:P2}", dict3[key]):N0} | {String.Format("{0:P2}", dict3[key]):N0}  | ");
+                    }
+                }
+            }
+            else
+            {
+                foreach (var key in dict2.Keys)
+                {
+                    if (dict1.Keys.Contains(key))
+                    {
+                        diffLineRate= dict2[key] - dict1[key];
+                        if (diffLineRate < 0)
+                        {
+                            status = ":small_red_triangle_down:";
+                        }
+                        else if (diffLineRate == 0)
+                        {
+                            status = "\uFF1D";
+                        }
+                        else
+                        {
+                            status = ":white_check_mark:";
+                        }
+                        markdownOutput.AppendLine($"{key} | {String.Format("{0:P2}", dict1[key]):N0} | {String.Format("{0:P2}", dict2[key]):N0} | {String.Format("{0:P2}", diffLineRate):NO} | {status} "); 
+                    }
+                    else
+                    {
+                        dict3.Add(key, dict2[key]);
+                        Console.WriteLine("dict3----------------- key count:" + dict3.Keys.Count);
+                        markdownOutput.AppendLine($"{key} | - | {String.Format("{0:P2}", dict3[key]):N0} | {String.Format("{0:P2}", dict3[key]):N0}  | ");
+                    }
+                }
+            }
+            return Tuple.Create(markdownOutput.ToString(), diffLineRate);
+        }
+        private static Dictionary<string, double> getLineRate(CodeCoverage[] packages)
+        {
+            var packageDict = new Dictionary<string, double>();
+            var status = string.Empty;
+
+            foreach (var package in packages)
+            {
+                packageDict.Add(package.Name, package.LineRate);
+            }
+            Console.WriteLine("Dictionary count:" + packageDict.Count);
+            return packageDict;
+        }
+
+        private static string AddCheck(CodeSummary[] summaries, string badgeUrl)
+        {
+            string status = string.Empty;
             StringBuilder markdownOutput = new();
 
             if (!string.IsNullOrWhiteSpace(badgeUrl))
@@ -207,18 +380,77 @@ namespace CodeCoverageSummary
                 markdownOutput.AppendLine("");
             }
 
-            markdownOutput.AppendLine("Package | Line Rate | Branch Rate | Complexity")
-                          .AppendLine("-------- | --------- | ----------- | ----------");
+            var diff_LineRate = summaries[1].LineRate - summaries[0].LineRate;
 
-            foreach (CodeCoverage package in summary.Packages)
+            status = diff_LineRate >= 0 ? ":white_check_mark:" : ":small_red_triangle_down:";
+            var diff_LineCovered = summaries[1].LinesCovered - summaries[0].LinesCovered;
+            var diff_LineValid = summaries[1].LinesValid - summaries[0].LinesValid;
+
+            markdownOutput.AppendLine("Package | Base Branch | Current Branch | Difference | Status")
+                          .AppendLine("-------- | --------- | ----------- | ---------- | ----------");
+
+            markdownOutput.Append($"**Summary** | **{String.Format("{0:P2}", summaries[0].LineRate):N0}** | ")
+                          .AppendLine($"**{String.Format("{0:P2}", summaries[1].LineRate):N0}** |  **{String.Format("{0:P2}", diff_LineRate):N0}** | {status}");
+
+
+            var dict1 = getLineRate(summaries[0].Packages.ToArray());
+            Console.WriteLine("dict1 key count:" + dict1.Keys.Count);
+            var dict2 = getLineRate(summaries[1].Packages.ToArray());
+            Console.WriteLine("dict2 key count:" + dict2.Keys.Count);
+            var dict3 = new Dictionary<string, double>();
+
+            if (dict1.Keys.Count >= dict2.Keys.Count)
             {
-                markdownOutput.AppendLine($"{package.Name} | {package.LineRate * 100:N0}% | {package.BranchRate * 100:N0}% | {package.Complexity}");
+                foreach (var key in dict1.Keys)
+                {
+                    if (dict2.Keys.Contains(key) == false)
+                    {
+                        dict3.Add(key, dict2[key]);
+                        Console.WriteLine("dict3 key count:" + dict2.Keys.Count);
+                        markdownOutput.AppendLine($"{key} | - | {String.Format("{0:P2}", dict3[key]):N0} | {String.Format("{0:P2}", dict3[key]):N0}  | ");
+                    }
+                    else
+                    {
+                        var diff = dict2[key] - dict1[key];
+                        if (diff < 0)
+                        {
+                            status = ":small_red_triangle_down:";
+                        }
+                        else
+                        {
+                            status = ":white_check_mark:";
+                        }
+                        markdownOutput.AppendLine($"{key} | {String.Format("{0:P2}", dict1[key]):N0} | {String.Format("{0:P2}", dict2[key]):N0} | {String.Format("{0:P2}", diff):NO} | {status} ");
+                    }
+                }
             }
-
-            markdownOutput.Append($"**Summary** | **{summary.LineRate * 100:N0}%** ({summary.LinesCovered} / {summary.LinesValid}) | ")
-                          .AppendLine($"**{summary.BranchRate * 100:N0}%** ({summary.BranchesCovered} / {summary.BranchesValid}) | {summary.Complexity}");
-
+            else
+            {
+                foreach (var key in dict2.Keys)
+                {
+                    if (dict1.Keys.Contains(key) == false)
+                    {
+                        dict3.Add(key, dict2[key]);
+                        Console.WriteLine("dict3 key count:" + dict2.Keys.Count);
+                        markdownOutput.AppendLine($"{key} | - | {String.Format("{0:P2}", dict3[key]):N0} | {String.Format("{0:P2}", dict3[key]):N0}  | ");
+                    }
+                    else
+                    {
+                        var diff = dict2[key] - dict1[key];
+                        if (diff < 0)
+                        {
+                            status = ":small_red_triangle_down:";
+                        }
+                        else
+                        {
+                            status = ":white_check_mark:";
+                        }
+                        markdownOutput.AppendLine($"{key} | {String.Format("{0:P2}", dict1[key]):N0} | {String.Format("{0:P2}", dict2[key]):N0} | {String.Format("{0:P2}", diff):NO} | {status} ");
+                    }
+                }
+            }
             return markdownOutput.ToString();
         }
     }
 }
+

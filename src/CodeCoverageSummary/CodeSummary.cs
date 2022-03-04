@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Drawing;
 
 namespace CodeCoverageSummary
 {
@@ -11,6 +12,8 @@ namespace CodeCoverageSummary
         public double BranchRate { get; set; }
 
         public int Complexity { get; set; }
+
+        public string Status { get; set; }
     }
 
     public class CodeSummary
@@ -30,6 +33,9 @@ namespace CodeCoverageSummary
         public int Complexity { get; set; }
 
         public List<CodeCoverage> Packages { get; set; }
+
+        public string Status { get; set; }
+        public Color PackageColor { get; set; }
 
         public CodeSummary()
         {

@@ -6,11 +6,10 @@ Code Coverage Summary was designed for use with [Coverlet](https://github.com/co
 
 ## Inputs
 
-#### `filename`
+#### `files`
 **Required**
 
-Code coverage file to analyse.
-
+Code coverage files to analyse and compare. Please enter your files comma separated. First file should be Base file. Ex. BaseBranchCoverage.xml,CurrentBranchCoverage.xml
 Note: Coverlet creates the coverage file in a random named directory (guid) so you need to copy it to a predictable path before running this Action, see the [.Net 5 Workflow Example](#net-5-workflow-example) below.
 
 #### `badge`
@@ -94,9 +93,9 @@ jobs:
       run: cp coverage/**/coverage.cobertura.xml coverage/coverage.cobertura.xml
 
     - name: Code Coverage Summary Report
-      uses: irongut/CodeCoverageSummary@v1.0.1
+      uses: limbasiyaketan0821/CodeCoverageSummary@master
       with:
-        filename: coverage/coverage.cobertura.xml
+        file: BaseBranch.xml,CurrentBranch.xml  
         badge: true
         format: 'markdown'
         output: 'both'

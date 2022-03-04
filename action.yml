@@ -1,13 +1,17 @@
-name: 'Code Coverage Summary'
-author: 'Irongut <murray.dave@outlook.com>'
+name: 'Code Coverage Cobertura' 
+author: 'Ketan <limbasiyaketan@gmail.com>'
 description: 'A GitHub Action that reads Cobertura format code coverage files and outputs a text or markdown summary.'
 branding:
   icon: book-open
   color: purple
 inputs:
-  filename:
-    description: 'Code coverage file to analyse.'
+  files:
+    description: 'Code coverage files to analyse and compare. Please enter your files comma separated. First file should be Base file. Ex. BaseBranchCoverage.xml,CurrentBranchCoverage.xml'
     required: true
+  allow_coverage_diff:
+    description: 'Input allowed coverage difference between two branches in %.'
+    required: false
+    default: -0.1
   badge:
     description: 'Include a badge in the output - true / false (default).'
     required: false
@@ -24,7 +28,9 @@ runs:
   using: 'docker'
   image: 'Dockerfile'
   args:
-    - ${{ inputs.filename }}
+    - ${{ inputs.files }}
+    - '--allow_coverage_diff'
+    - ${{ inputs.allow_coverage_diff }}
     - '--badge'
     - ${{ inputs.badge }}
     - '--format'
